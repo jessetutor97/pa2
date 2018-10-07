@@ -24,7 +24,7 @@ int main(int argc, char *argv[]){
 	server.sin_port = htons(rcv_port);
 	server.sin_addr.s_addr = htonl(INADDR_ANY);
 
-    // Bind docket to an address/port number
+    // Bind socket to an address/port number
     bind(udp_socket, (struct sockaddr *)&server, s_len);
 
 	bytes_recvd = recvfrom(udp_socket, payload, 5, 0, (struct sockaddr *)&server, &s_len);
