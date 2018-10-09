@@ -51,7 +51,7 @@ int main(int argc, char *argv[]) {
     struct sockaddr_in send_server;
     memset((char *)&send_server, 0, s_len);
     send_server.sin_family = AF_INET;
-    uint16_t send_port = atoi(argv[3]);
+    int send_port = atoi(argv[3]);
     send_server.sin_port = htons(send_port);
     bcopy((char *)s->h_addr, (char *)&send_server.sin_addr.s_addr, s->h_length);
 
