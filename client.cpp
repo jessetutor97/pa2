@@ -15,6 +15,12 @@ int main(int argc, char *argv[]) {
     struct hostent *s;
     s = gethostbyname(argv[1]);
 
+    // Print host name and IP address
+    printf("-----------------------------------------\n\n");
+    printf("Host name: %s\n", argv[1]);
+    printf("IP address: %i.%i.%i.%i\n\n", s->h_addr[0], s->h_addr[1], s->h_addr[2], s->h_addr[3]);
+    printf("-----------------------------------------\n");
+
     // Set destination info
     struct sockaddr_in send_server;
     socklen_t s_len = sizeof(send_server);
@@ -24,14 +30,7 @@ int main(int argc, char *argv[]) {
     send_server.sin_port = htons(send_port);
     bcopy((char *)s->h_addr, (char *)&send_server.sin_addr.s_addr, s->h_length);
 
-    // Send data
-    char send_payload[5] = "test";
-    packet send_packet(1, 0, 5, send_payload);
-    char s_send_packet[24];
-    send_packet.serialize(s_send_packet);
-    sendto(send_socket, s_send_packet, 24, 0, (struct sockaddr *)&send_server, s_len);
-
-    // Declare UDP socket for receiving acknowledgement
+    // Declare UDP socket for receiving acknowledgements
     int rcv_socket = socket(AF_INET, SOCK_DGRAM, 0);
 
     // Set destination info
@@ -45,14 +44,132 @@ int main(int argc, char *argv[]) {
     // Bind socket to an address/port number
     bind(rcv_socket, (struct sockaddr *)&rcv_server, s_len);
 
-    // Wait for data to arrive
-    char s_rcv_packet[24];
-    recvfrom(rcv_socket, s_rcv_packet, 24, 0, (struct sockaddr *)&rcv_server, &s_len);
+    // Open file for reading
+    FILE *fp;
+    fp = fopen(argv[4], "r");
 
-    // Deserialize packet and print
+    // Determine number of bytes in file
+    int num_bytes = 0;
+    char data = 0;
+    while (data != EOF) {
+        data = fgetc(fp);
+        ++num_bytes;
+    }
+    --num_bytes;
+    rewind(fp);
+
+    // Determine the number of packets to be sent
+    int num_full_pckts = num_bytes / 30;
+    int num_pckts = num_full_pckts;
+    int num_final_bytes = num_bytes % 30;
+    if (num_final_bytes != 0) {
+        ++num_pckts;
+    }
+
+    // Create the full packets and store in an array
+    packet* pckt_array[num_pckts];
+    char* payload_array[num_pckts];
+    char* s_pckt_array[num_pckts];
+    int seq_num = 0;
+    for (int i = 0; i < num_full_pckts; ++i) {
+        payload_array[i] = new char[30];
+        for (int j = 0; j < 30; ++j) {
+            payload_array[i][j] = fgetc(fp);
+        }
+        pckt_array[i] = new packet(1, seq_num++, 30, payload_array[i]);
+        s_pckt_array[i] = new char[37];
+        pckt_array[i]->serialize(s_pckt_array[i]);
+        seq_num %= 8;
+    }
+
+    // Add the last packet if necessary
+    if (num_final_bytes != 0) {
+        payload_array[num_pckts - 1] = new char[num_final_bytes];
+        for (int i = 0; i < num_final_bytes; ++i) {
+            payload_array[num_pckts - 1][i] = fgetc(fp);
+        }
+        pckt_array[num_pckts - 1] = new packet(1, seq_num++, num_final_bytes, payload_array[num_pckts - 1]);
+        s_pckt_array[num_pckts - 1] = new char[37];
+        pckt_array[num_pckts - 1]->serialize(s_pckt_array[num_pckts - 1]);
+        seq_num %= 8;
+    }
+
+    // Start transmission
+    int w_size = 7;
+    if (num_pckts < 7) {
+        w_size = num_pckts;
+    }
+    int send_base = 0;
+    int next_sn = 0;
+    int o_pckts = 0;
+    int next_pckt = 0;
+    int pckt_ack_count = 0;
     packet rcv_packet(4, 0, 0, 0);
-    rcv_packet.deserialize(s_rcv_packet);
-    rcv_packet.printContents();
+    char s_rcv_packet[24];
+    bool packets_left = true;
+    bool transmitting = true;
+    while (transmitting) {
+        // Check if the window is full
+        while (next_pckt - send_base < w_size && packets_left) {
+            // If window is not full, send a packet and update variables
+            sendto(send_socket, s_pckt_array[next_pckt], 37, 0, (struct sockaddr *)&send_server, s_len);
+            pckt_array[next_pckt++]->printContents();
+            next_sn = (next_sn + 1) % 8;
+            ++o_pckts;
+            printf("SB: %i\n", send_base);
+            printf("NS: %i\n", next_sn);
+            printf("Number of outstanding packets: %i\n", o_pckts);
+            printf("Window size: %i\n", w_size);
+            printf("--------------------------------------\n");
+        }
+        // Wait for acknowledge
+        recvfrom(rcv_socket, s_rcv_packet, 24, 0, (struct sockaddr *)&rcv_server, &s_len);
+
+        // Deserialize packet and print
+        rcv_packet.deserialize(s_rcv_packet);
+        rcv_packet.printContents();
+
+        // Update variables
+        pckt_ack_count = w_size + 1 - ((next_pckt - rcv_packet.getSeqNum()) % 8);
+        send_base += pckt_ack_count;
+        if (next_pckt == num_pckts) {
+            packets_left = false;
+            --w_size;
+        }
+        o_pckts -= pckt_ack_count;
+        printf("SB: %i\n", send_base % 8);
+        printf("NS: %i\n", next_sn);
+        printf("Number of outstanding packets: %i\n", o_pckts);
+        printf("Window size: %i\n", w_size);
+        printf("--------------------------------------\n");
+        if (w_size == 0) {
+            transmitting = false;
+        }
+    }
+
+    // Send EOT packet
+    char s_eot_packet[24];
+    packet eot_packet(3, next_sn, 0, 0);
+    eot_packet.serialize(s_eot_packet);
+    printf("Sending EOT packet to server.\n");
+    sendto(send_socket, s_eot_packet, 24, 0, (struct sockaddr *)&send_server, s_len);
+    eot_packet.printContents();
+
+    // Wait for EOT from server
+    recvfrom(rcv_socket, s_eot_packet, 24, 0, (struct sockaddr *)&rcv_server, &s_len);
+    eot_packet.deserialize(s_eot_packet);
+    eot_packet.printContents();
+    printf("EOT packet received. Exiting.--------------------------------------\n");
+
+    // Delete array data
+    for (int i = 0; i < num_pckts; ++i) {
+        delete pckt_array[i];
+        delete payload_array[i];
+        delete s_pckt_array[i];
+    }
+
+    // Close file
+    fclose(fp);
 
     // Close sockets
     close(send_socket);
