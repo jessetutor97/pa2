@@ -7,7 +7,16 @@
 #include <stdlib.h>
 #include "packet.h"
 
+int alarm_flag = 0;
+
+void sigalrm_handler(int sig){
+	alarm_flag = 1;
+}
+
+
 int main(int argc, char *argv[]) {
+    signal(SIGALRM, &sigalrm_handler);
+	
     // Declare UDP socket for sending data
     int send_socket = socket(AF_INET, SOCK_DGRAM, 0);
 
@@ -112,6 +121,7 @@ int main(int argc, char *argv[]) {
         // Check if the window is full
         while (next_pckt - send_base < w_size && packets_left) {
             // If window is not full, send a packet and update variables
+	    alarm(2);
             sendto(send_socket, s_pckt_array[next_pckt], 37, 0, (struct sockaddr *)&send_server, s_len);
             pckt_array[next_pckt++]->printContents();
             next_sn = (next_sn + 1) % 8;
@@ -125,8 +135,29 @@ int main(int argc, char *argv[]) {
         // Wait for acknowledge
         recvfrom(rcv_socket, s_rcv_packet, 24, 0, (struct sockaddr *)&rcv_server, &s_len);
 
+	// If alarm interrupts receive call, retransmit all outstanding packets
+	if (alarm_flag == 1){
+		next_pckt = send_base % 8;
+		next_sn = send_base % 8;
+		alarm_flag = 0;
+		continue;
+	}
+
         // Deserialize packet and print
         rcv_packet.deserialize(s_rcv_packet);
+
+	// If duplicate packet received, retransmit
+	if (rcv_packet.getSeqNum() == send_base % 8 - 1){
+		next_pckt = send_base % 8;
+		next_sn = send_base % 8;
+		continue;
+	}
+		
+	// Update alarm if packet received
+	if (rcv_packet.getSeqNum() >= send_base % 8){
+		alarm(2);
+	}
+
         rcv_packet.printContents();
 
         // Update variables
