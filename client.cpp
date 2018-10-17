@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <signal.h>
 #include "packet.h"
+#include <poll.h>
 
 int alarm_flag = 0;
 
@@ -110,20 +111,24 @@ int main(int argc, char *argv[]) {
     if (num_pckts < 7) {
         w_size = num_pckts;
     }
+    struct pollfd ufds;
+    ufds.fd = rcv_socket;
+    ufds.events = POLLIN;
     int send_base = 0;
     int next_sn = 0;
     int o_pckts = 0;
     int next_pckt = 0;
     int pckt_ack_count = 0;
+    int timeout = 0;
     packet rcv_packet(4, 0, 0, 0);
     char s_rcv_packet[24];
     bool packets_left = true;
     bool transmitting = true;
     while (transmitting) {
         // Check if the window is full
-	    alarm(2);
         while (next_pckt - send_base < w_size && packets_left) {
             // If window is not full, send a packet and update variables
+            printf("Next packet: %i\n", next_pckt);
             sendto(send_socket, s_pckt_array[next_pckt], 37, 0, (struct sockaddr *)&send_server, s_len);
             pckt_array[next_pckt++]->printContents();
             next_sn = (next_sn + 1) % 8;
@@ -133,35 +138,38 @@ int main(int argc, char *argv[]) {
             printf("Number of outstanding packets: %i\n", o_pckts);
             printf("Window size: %i\n", w_size);
             printf("--------------------------------------\n");
+            /*
+            if (next_pckt == num_pckts) {
+                packets_left = false;
+                --w_size;
+            }
+            */
         }
         // Wait for acknowledge
-        recvfrom(rcv_socket, s_rcv_packet, 24, 0, (struct sockaddr *)&rcv_server, &s_len);
+        timeout = poll(&ufds, 1, 2000);
+        printf("%i\n", timeout);
+        if (timeout > 0) {
+            recvfrom(rcv_socket, s_rcv_packet, 24, 0, (struct sockaddr *)&rcv_server, &s_len);
+        }
 
-        printf("next line\n");
+	    // If alarm interrupts receive call, retransmit all outstanding packets
+        else if (timeout == 0) {
+            printf("alarm flag\n");
+		    next_pckt = send_base % 8;
+		    next_sn = send_base % 8;
+            o_pckts = 0;
+		    continue;
+	    }
 
-	// If alarm interrupts receive call, retransmit all outstanding packets
-	if (alarm_flag == 1){
-        printf("alarm flag\n");
-		next_pckt = send_base % 8;
-		next_sn = send_base % 8;
-		alarm_flag = 0;
-		continue;
-	}
+        // Deserialize packet and print
+        rcv_packet.deserialize(s_rcv_packet);
 
-    // Deserialize packet and print
-    rcv_packet.deserialize(s_rcv_packet);
-
-	// If duplicate packet received, retransmit
-	if (rcv_packet.getSeqNum() == (send_base % 8) - 1){
-		next_pckt = send_base % 8;
-		next_sn = send_base % 8;
-		continue;
-	}
-		
-	// Update alarm if packet received
-	if (rcv_packet.getSeqNum() >= send_base % 8){
-		alarm(2);
-	}
+	    // If duplicate packet received, retransmit
+	    if (rcv_packet.getSeqNum() == (send_base % 8) - 1){
+		    next_pckt = send_base % 8;
+		    next_sn = send_base % 8;
+		    continue;
+	    }
 
         rcv_packet.printContents();
 

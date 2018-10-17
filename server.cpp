@@ -64,6 +64,7 @@ int main(int argc, char *argv[]) {
         rcv_packet.deserialize(s_rcv_packet);
         printf("-----------------------------------------\n");
         rcv_packet.printContents();
+        printf("Expecting Sn: %i\n", sn_expecting);
         printf("sn: %i\n", rcv_packet.getSeqNum());
         if (rcv_packet.getSeqNum() != sn_expecting && first_packet) {
             continue;
@@ -76,6 +77,7 @@ int main(int argc, char *argv[]) {
             continue;
         }
 
+        first_packet = false;
         seq_num = rcv_packet.getSeqNum();
         sn_expecting = (sn_expecting + 1) % 8;
 
