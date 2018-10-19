@@ -5,21 +5,20 @@
 #include <unistd.h>
 #include <string.h>
 #include <stdlib.h>
-#include <signal.h>
-#include "packet.h"
 #include <poll.h>
+#include "packet.h"
 
-int alarm_flag = 0;
-
-void sigalrm_handler(int sig){
-	alarm_flag = 1;
-    printf("ALARM\n");
+int ack_calc(int seq_num, int send_base) {
+    int temp_num = (send_base % 8) - 1;
+    int count = 0;
+    while (temp_num != seq_num) {
+        temp_num = (temp_num + 1) % 8;
+        ++count;
+    }
+    return count;
 }
 
-
 int main(int argc, char *argv[]) {
-    signal(SIGALRM, &sigalrm_handler);
-	
     // Declare UDP socket for sending data
     int send_socket = socket(AF_INET, SOCK_DGRAM, 0);
 
@@ -126,9 +125,8 @@ int main(int argc, char *argv[]) {
     bool transmitting = true;
     while (transmitting) {
         // Check if the window is full
-        while (next_pckt - send_base < w_size && packets_left) {
+        while (next_pckt - send_base < w_size && next_pckt < num_pckts) {
             // If window is not full, send a packet and update variables
-            printf("Next packet: %i\n", next_pckt);
             sendto(send_socket, s_pckt_array[next_pckt], 37, 0, (struct sockaddr *)&send_server, s_len);
             pckt_array[next_pckt++]->printContents();
             next_sn = (next_sn + 1) % 8;
@@ -138,12 +136,6 @@ int main(int argc, char *argv[]) {
             printf("Number of outstanding packets: %i\n", o_pckts);
             printf("Window size: %i\n", w_size);
             printf("--------------------------------------\n");
-            /*
-            if (next_pckt == num_pckts) {
-                packets_left = false;
-                --w_size;
-            }
-            */
         }
         // Wait for acknowledge
         timeout = poll(&ufds, 1, 2000);
@@ -152,33 +144,33 @@ int main(int argc, char *argv[]) {
             recvfrom(rcv_socket, s_rcv_packet, 24, 0, (struct sockaddr *)&rcv_server, &s_len);
         }
 
-	    // If alarm interrupts receive call, retransmit all outstanding packets
+        // If alarm interrupts receive call, retransmit all outstanding packets
         else if (timeout == 0) {
             printf("alarm flag\n");
-		    next_pckt = send_base % 8;
-		    next_sn = send_base % 8;
+            next_pckt = send_base;
+            next_sn = send_base % 8;
             o_pckts = 0;
-		    continue;
-	    }
+            continue;
+        }
 
         // Deserialize packet and print
         rcv_packet.deserialize(s_rcv_packet);
-
-	    // If duplicate packet received, retransmit
-	    if (rcv_packet.getSeqNum() == (send_base % 8) - 1){
-		    next_pckt = send_base % 8;
-		    next_sn = send_base % 8;
-		    continue;
-	    }
-
         rcv_packet.printContents();
 
+        // If packet is lost, retransmit
+        if (rcv_packet.getSeqNum() == (send_base + 7) % 8){
+            printf("Packet dropped\n");
+            next_pckt = send_base;
+            next_sn = send_base % 8;
+            o_pckts = 0;
+            continue;
+        }
+
         // Update variables
-        pckt_ack_count = w_size + 1 - ((next_pckt - rcv_packet.getSeqNum()) % 8);
+        pckt_ack_count = ack_calc(rcv_packet.getSeqNum(), send_base);
         send_base += pckt_ack_count;
         if (next_pckt == num_pckts) {
-            packets_left = false;
-            --w_size;
+            w_size -= pckt_ack_count;
         }
         o_pckts -= pckt_ack_count;
         printf("SB: %i\n", send_base % 8);
