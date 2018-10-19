@@ -9,7 +9,7 @@
 #include "packet.h"
 
 int ack_calc(int seq_num, int send_base) {
-    int temp_num = (send_base % 8) - 1;
+    int temp_num = (send_base + 7) % 8;
     int count = 0;
     while (temp_num != seq_num) {
         temp_num = (temp_num + 1) % 8;
@@ -121,7 +121,6 @@ int main(int argc, char *argv[]) {
     int timeout = 0;
     packet rcv_packet(4, 0, 0, 0);
     char s_rcv_packet[24];
-    bool packets_left = true;
     bool transmitting = true;
     while (transmitting) {
         // Check if the window is full
@@ -139,14 +138,13 @@ int main(int argc, char *argv[]) {
         }
         // Wait for acknowledge
         timeout = poll(&ufds, 1, 2000);
-        printf("%i\n", timeout);
         if (timeout > 0) {
             recvfrom(rcv_socket, s_rcv_packet, 24, 0, (struct sockaddr *)&rcv_server, &s_len);
         }
 
         // If alarm interrupts receive call, retransmit all outstanding packets
         else if (timeout == 0) {
-            printf("alarm flag\n");
+            printf("Timeout occurred, resending packets\n");
             next_pckt = send_base;
             next_sn = send_base % 8;
             o_pckts = 0;
@@ -159,7 +157,7 @@ int main(int argc, char *argv[]) {
 
         // If packet is lost, retransmit
         if (rcv_packet.getSeqNum() == (send_base + 7) % 8){
-            printf("Packet dropped\n");
+            printf("Packet was lost, resending packets\n");
             next_pckt = send_base;
             next_sn = send_base % 8;
             o_pckts = 0;

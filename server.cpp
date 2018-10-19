@@ -53,7 +53,6 @@ int main(int argc, char *argv[]) {
     // Wait for data to arrive
     int sn_expecting = 0;
     int seq_num = 0;
-    int length = 0;
     char rcv_payload[30] = {0};
     char s_ack_packet[24];
     packet rcv_packet(1, 0, 30, rcv_payload);
