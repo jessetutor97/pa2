@@ -58,6 +58,10 @@ int main(int argc, char *argv[]) {
     // Open file for reading
     FILE *fp;
     fp = fopen(argv[4], "r");
+    FILE *seq_num_file;
+    seq_num_file = fopen("seqnum.log", "w");
+    FILE *ack_file;
+    ack_file = fopen("ack.log", "w");
 
     // Determine number of bytes in file
     int num_bytes = 0;
@@ -127,6 +131,8 @@ int main(int argc, char *argv[]) {
         while (next_pckt - send_base < w_size && next_pckt < num_pckts) {
             // If window is not full, send a packet and update variables
             sendto(send_socket, s_pckt_array[next_pckt], 37, 0, (struct sockaddr *)&send_server, s_len);
+            // Write sequence numbers of sent packets to log file
+            fprintf(seq_num_file, "%i\n", pckt_array[next_pckt]->getSeqNum());
             pckt_array[next_pckt++]->printContents();
             next_sn = (next_sn + 1) % 8;
             ++o_pckts;
@@ -154,6 +160,9 @@ int main(int argc, char *argv[]) {
         // Deserialize packet and print
         rcv_packet.deserialize(s_rcv_packet);
         rcv_packet.printContents();
+
+        // Write sequence number of received packets to log file
+        fprintf(ack_file, "%i\n", rcv_packet.getSeqNum()); 
 
         // If packet is lost, retransmit
         if (rcv_packet.getSeqNum() == (send_base + 7) % 8){
@@ -184,6 +193,8 @@ int main(int argc, char *argv[]) {
     // Send EOT packet
     char s_eot_packet[24];
     packet eot_packet(3, next_sn, 0, 0);
+    // Write sequence number of sent EOT packet to log file
+    fprintf(seq_num_file, "%i\n", eot_packet.getSeqNum());
     eot_packet.serialize(s_eot_packet);
     printf("Sending EOT packet to server.\n");
     sendto(send_socket, s_eot_packet, 24, 0, (struct sockaddr *)&send_server, s_len);
@@ -193,6 +204,8 @@ int main(int argc, char *argv[]) {
     recvfrom(rcv_socket, s_eot_packet, 24, 0, (struct sockaddr *)&rcv_server, &s_len);
     eot_packet.deserialize(s_eot_packet);
     eot_packet.printContents();
+    // Write sequence number of received EOT packet to log file
+    fprintf(ack_file, "%i\n", eot_packet.getSeqNum());
     printf("EOT packet received. Exiting.--------------------------------------\n");
 
     // Delete array data
@@ -202,8 +215,10 @@ int main(int argc, char *argv[]) {
         delete s_pckt_array[i];
     }
 
-    // Close file
+    // Close files
     fclose(fp);
+    fclose(ack_file);
+    fclose(seq_num_file);
 
     // Close sockets
     close(send_socket);

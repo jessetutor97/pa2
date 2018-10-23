@@ -48,7 +48,9 @@ int main(int argc, char *argv[]) {
 
     // Open file for writing
     FILE *fp;
+    FILE *arrive;
     fp = fopen(argv[4], "w");
+    arrive = fopen("arrival.log", "w");
 
     // Wait for data to arrive
     int sn_expecting = 0;
@@ -65,6 +67,10 @@ int main(int argc, char *argv[]) {
         rcv_packet.printContents();
         printf("Expecting Sn: %i\n", sn_expecting);
         printf("sn: %i\n", rcv_packet.getSeqNum());
+
+        // Write sequence numbers to log file
+        fprintf(arrive, "%i\n", rcv_packet.getSeqNum());
+
         if (rcv_packet.getSeqNum() != sn_expecting && first_packet) {
             continue;
         }
@@ -90,12 +96,13 @@ int main(int argc, char *argv[]) {
             receiving = false;
             continue;
         }
-
-        // Send acknowledge back
-        packet ack_packet(0, seq_num, 0, 0);
-        ack_packet.serialize(s_ack_packet);
-        sendto(send_socket, s_ack_packet, 24, 0, (struct sockaddr *)&send_server, s_len);
-        ack_packet.printContents();
+        else {
+            // Send acknowledge back
+            packet ack_packet(0, seq_num, 0, 0);
+            ack_packet.serialize(s_ack_packet);
+            sendto(send_socket, s_ack_packet, 24, 0, (struct sockaddr *)&send_server, s_len);
+            ack_packet.printContents();
+        }
 
         // Write data to file
         for (int i = 0; i < 30; ++i) {
@@ -109,6 +116,7 @@ int main(int argc, char *argv[]) {
 
     // Close file
     fclose(fp);
+    fclose(arrive);
 
     // Close sockets
     close(rcv_socket);
