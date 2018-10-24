@@ -201,11 +201,13 @@ int main(int argc, char *argv[]) {
     eot_packet.printContents();
 
     // Wait for EOT from server
-    recvfrom(rcv_socket, s_eot_packet, 24, 0, (struct sockaddr *)&rcv_server, &s_len);
-    eot_packet.deserialize(s_eot_packet);
-    eot_packet.printContents();
-    // Write sequence number of received EOT packet to log file
-    fprintf(ack_file, "%i\n", eot_packet.getSeqNum());
+    while (eot_packet.getType() != 2) {
+        recvfrom(rcv_socket, s_eot_packet, 24, 0, (struct sockaddr *)&rcv_server, &s_len);
+        eot_packet.deserialize(s_eot_packet);
+        eot_packet.printContents();
+        // Write sequence number of received EOT packet to log file
+        fprintf(ack_file, "%i\n", eot_packet.getSeqNum());
+    }
     printf("EOT packet received. Exiting.--------------------------------------\n");
 
     // Delete array data
